@@ -1,0 +1,926 @@
+---
+title: "Bank Loan Classification - HarvardX Capstone Project"
+author: "Pradeep Kumar"
+date: "19/06/2020"
+output: 
+  pdf_document: 
+    fig_caption: yes
+    highlight: espresso
+    keep_tex: yes
+    number_sections: yes
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Executive Summary
+
+  As part of its customer acquisition efforts, **Bank of India** wants to run a campaign to convince more of its current customers to accept personal loan offers. In order to improve targeting quality, they want to find customers that are most likely to accept the personal loan offer. The dataset is from a previous campaign on 5,000 customers, 4,80 of them accepted. The metrics used to evaluate the models is **Classification Accuracy and F1-Score**; Although Accuracy is useful, we consider the F1-Score because the prediction class is unbalanced.    
+We have obtained an **F1-Score** of approximately **0.911** and Accuracy of **98.31%** for the best performing model.     
+
+\pagebreak
+
+# Introduction
+
+We use the dataset to solve the classification task. We go through the machine learning pipeline, starting with reading the dataset and exploring the data through plots and summaries. Then, we move to preprocess the data to standardize the data and check for any missing values. Later, we build models to classify the data. Finally, we evaluate the best models using the whole test dataset.    
+
+## Objective of the project
+
+The goal of this project is to train a  machine learning model that classifies whether or not a customer will take a personal loan. Hence, the target variable is **Personal Loan**.    
+
+The metric used to evaluate the model's performance is the F1-Score. It is used because we have an unbalanced dataset. It tries to maximize both precision and recall.    
+
+## Dataset
+
+The dataset used is the [Bank of India dataset](https://datasetbankofindia.s3.ap-south-1.amazonaws.com/Bank_of_India.csv) of 5,000 customers.    
+The dataset is from a previous campaign on 5,000 customers run by the bank.    
+
+The **variables in the dataset** are described as follows:    
+
+```
+1. id: Customer ID
+2. age: Customer's age in completed years
+3. experience: Number of years of professional experience
+4. income: Annual income of the customer (in thousands)
+5. zip: Home Address ZIP code.
+6. family: The family size of the customer
+7. credit_card_spend: Avg. spending on credit cards per month (in thousands)
+8. education: Education Level. 1: Undergrad; 2: Graduate; 3: Advanced/Professional
+9. mortgage: Value of house mortgage if any. (in thousands)
+10. personal_loan: Did this customer accept the personal loan offered in the last campaign?
+11. securities_account: Does the customer have securities account with the bank?
+12. cd_account: Does the customer have a certificate of deposit (CD) account with the bank?
+13. online: Does the customer use internet banking facilities?
+14. credit_card: Does the customer use a credit card issued by Bank?
+
+```
+
+
+```{r dependencies, include = FALSE}
+# Load necessary dependencies (Install if unavaliable)
+if(!require(readr)) install.packages("readr", repos = "http://cran.us.r-project.org")
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(knitr)) install.packages("knitr", repos = "http://cran.us.r-project.org")
+if(!require(ggthemes)) install.packages("ggthemes", repos = "http://cran.us.r-project.org")
+if(!require(RColorBrewer)) install.packages("RColorBrewer", repos = "http://cran.us.r-project.org")
+if(!require(GGally)) install.packages("GGally", repos = "http://cran.us.r-project.org")
+if(!require(matrixStats)) install.packages("matrixStats", repos = "http://cran.us.r-project.org")
+```
+
+We read the dataset using either the local file, if available offline, or directly from the set up amazon s3 bucket.
+
+```{r read, echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE}
+# Read data directly from my s3 bucket
+raw_data<-read_csv("https://datasetbankofindia.s3.ap-south-1.amazonaws.com/Bank_of_India.csv")
+
+# Read data from local file if you clone my repo
+# raw_data <- read_csv("./dataset/Bank_of_India.csv")
+```
+
+
+First, To get familiar with the dataset, we look at the head of the dataset.    
+
+```{r head, echo = FALSE}
+# Sample a few data points from the start
+head(raw_data)
+```
+
+We check if the dat has any missing values:      
+
+```{r colsum, echo = TRUE}
+# Check for missing values
+colSums(is.na(raw_data))
+# turns out: No missing value; 
+# If there were missing values do imputation or knn imputation
+```
+
+We confirm that there are **no missing values(NAs)**. Hence, we do not need to remove or impute missing values.
+
+```{r summary, echo = TRUE}
+# Summary Statistics of the dataset
+summary(raw_data)
+```
+
+From the structure of the dataset, we see that all the columns are interpreted as **numeric**. We need to change the types of some variables to **categorical(factor)**.
+
+```{r str, echo =FALSE}
+# Structure of dataset
+str(raw_data)
+```
+
+
+## Preliminary Data Cleaning
+
+We know that Id and ZIP code are not valuable information when it comes to being useful for the classification task. Hence, we have deleted both variables from the dataset.
+
+```{r}
+# Removing unnecessary columns ID and zipcode
+raw_data$id <- NULL
+raw_data$zip <- NULL
+```
+
+Next, we change the categorical vairables **perosonal_loan**, **education**, **family**, **securities_account**, **online**, **credit_card** into factors.
+
+```{r}
+# Do necessary type conversions | Categoridcal Data
+raw_data$personal_loan <- as_factor(raw_data$personal_loan)
+raw_data$education <- as_factor(raw_data$education)
+raw_data$family <- as_factor(raw_data$family)
+raw_data$securities_account <- as_factor(raw_data$securities_account)
+raw_data$cd_account <- as_factor(raw_data$cd_account)
+raw_data$online <- as_factor(raw_data$online)
+raw_data$credit_card <- as_factor(raw_data$credit_card)
+```
+
+
+We note that the types of variables have been updated as required.
+
+```{r}
+# Structure of the dataset
+str(raw_data)
+```
+
+\pagebreak
+
+# Exploratory Data Analysis
+
+## Odds
+
+We begin by calculating the odds of a customer taking a personal loan based on whether they have a securities account, whether they have a cd account, whether they engage in online banking, whether they use the bank credit card.
+
+```{r}
+# Calculating odds of taking a personal loan based on whether securities_account = 1
+limited = raw_data[raw_data$securities_account == "1",] 
+(likely_securities=sum(limited$personal_loan=="1")/sum(limited$personal_loan=="0"))
+```
+
+If people opened securities account, it is 0.12 times more likely that people would borrow than not
+
+```{r}
+# Calculating odds of taking a personal loan based on whether cd_account = 1
+limited = raw_data[raw_data$cd_account == "1",] 
+(likely_CD=sum(limited$personal_loan=="1")/sum(limited$personal_loan=="0"))
+```
+
+If people opened CD account, it is 0.86 times more likely that people would borrow than not
+
+```{r}
+# Calculating odds of taking a personal loan based on whether online = 1
+limited = raw_data[raw_data$online == "1",] 
+(likely_Online=sum(limited$personal_loan=="1")/sum(limited$personal_loan=="0"))
+```
+If people engaged in Online banking, it is 0.108 times more likely that people would borrow than not
+
+```{r}
+# Calculating odds of taking a personal loan based on whether credit_card = 1
+limited = raw_data[raw_data$credit_card == "1",] 
+(likely_CC=sum(limited$personal_loan=="1")/sum(limited$personal_loan=="0"))
+```
+
+If people used bank credit crads, it is 0.107 times more likely that people would borrow than not
+
+
+\pagebreak
+
+## Visuals
+
+### Univariate plots
+
+**Age Distribution**
+
+```{r, fig.height=3, fig.width=6}
+# Age Distribution bar plot
+raw_data %>% 
+  ggplot(aes(x = age)) +
+  geom_histogram(stat = 'bin', binwidth = 1.8, color = '#595959', fill = '#1E90FF') +
+  labs(title = "Age Distribution") +
+  theme_fivethirtyeight()
+```
+
+**Experience Distribution**
+
+```{r, fig.height=3, fig.width=6}
+# Experience distribution bar plot
+raw_data %>% 
+  ggplot(aes(x = experience)) +
+  geom_histogram(stat = 'bin', binwidth = 1.8, color = '#595959', fill = '#1E90FF') +
+  labs(title = "Experience Distribution") +
+  theme_fivethirtyeight()
+```
+
+We note that age and experience distributions look similar, They might be highly correlated. If so, we might have to remove one of the variables so that our models do not fail.
+
+**Income Distribution**
+```{r, fig.height=3, fig.width=6}
+# Income Distribution bar plot
+raw_data %>% 
+  ggplot(aes(x = income)) +
+  geom_bar(stat = 'bin', bins = 40, color = '#595959', fill = '#1E90FF') +
+  labs(title = "Income Distribution") +
+  theme_fivethirtyeight()
+```
+
+**Mortgage Distribution**
+```{r, warning = FALSE, fig.height=3, fig.width=6}
+# Mortgage Distribution bar plot
+raw_data %>% 
+  ggplot(aes(x = mortgage)) +
+  geom_bar(stat = 'bin', color = '#595959', fill = '#1E90FF') +
+  labs(title = "Mortage Distribution") +
+  theme_fivethirtyeight()
+```
+
+Seems like most people have no mortage (i.e, mortage is 0); So, we produce another plot removing those without mortgages.
+
+**Mortgage Distribution exclding people with no mortgages**
+```{r, fig.height=3, fig.width=6}
+# Mortage Distribution bar plot for people with mortgages (exclude 0)
+raw_data %>% 
+  filter(mortgage > 0) %>%
+  ggplot(aes(x = mortgage)) +
+  geom_bar(stat = 'bin', bins = 40, color = '#595959', fill = '#1E90FF') +
+  labs(title = "Mortgage Distribution") +
+  theme_fivethirtyeight()
+# It is a right skewed distribution
+```
+
+**Credit Card Spending Distribution**
+```{r, fig.height=3, fig.width=6}
+# Credit Card Spending Distribution bar plot for people with mortgages
+raw_data %>% 
+  ggplot(aes(x = credit_card_spend)) +
+  geom_bar(stat = 'bin', bins = 50, color = '#595959', fill = '#1E90FF') +
+  labs(title = "Credit Card Spending Distribution") +
+  theme_fivethirtyeight()
+# It is a right skewed distribution
+```
+
+\pagebreak
+
+### Bivariate Plots
+
+
+**Personal Loan vs. CD Account**
+```{r, fig.height=3, fig.width=6}
+# Stacked bar plot to test for Credit Card vs. personal loan
+raw_data %>% 
+  ggplot(aes(x = credit_card, y = personal_loan, fill = personal_loan)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() + 
+  scale_fill_manual(values=c('#DE3533','#51A8C9')) +
+  labs(title = "Personal Loan vs. CD Account") +
+  theme_fivethirtyeight() + 
+  theme(axis.title = element_text()) +
+  xlab('Credit Card')
+
+```
+
+We can observe that people who do not have a credit card are more likey to get personal loan.
+
+**Personal Loan vs. Credit Card Spending**
+```{r, fig.height=3, fig.width=6}
+# Bar plot to test for Credit Card Spending vs. personal loan
+raw_data %>% 
+  ggplot(aes(x = credit_card_spend, y = personal_loan, fill = personal_loan)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() + 
+  scale_fill_manual(values=c('#DE3533','#51A8C9')) +
+  labs(title = "Personal Loan vs. Credit Card Spending") +
+  theme_fivethirtyeight() +
+  theme(axis.title = element_text()) +
+  xlab('Credit Card Spending')
+```
+
+We can observe that people whose credit card spending is high do not generally borrow loans
+
+**Personal Loan vs. Income**
+```{r, fig.height=3, fig.width=6}
+# Bar plot to test for Income vs. personal loan
+raw_data %>% 
+  ggplot(aes(x = income, y = personal_loan, fill = personal_loan)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() + 
+  scale_fill_manual(values=c('#DE3533','#51A8C9')) +
+  labs(title = "Personal Loan vs. Income") +
+  theme_fivethirtyeight() +
+  theme(axis.title = element_text()) +
+  xlab('Income')
+```
+
+We can observe that people with higher incomes do not generally borrow loans
+
+**Personal Loan vs. Family**
+```{r, fig.height=3, fig.width=6}
+# Stacked bar plot to test for family vs. personal loan
+raw_data %>% 
+  ggplot(aes(x = family, y = personal_loan, fill = personal_loan)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() + 
+  scale_fill_manual(values=c('#DE3533','#51A8C9')) +
+  labs(title = "Personal Loan vs. Family") +
+  theme_fivethirtyeight() +
+  theme(axis.title = element_text()) +
+  xlab('Family Members')
+```
+
+We observe the differnce in whether or not people take loans based on the number of family members.
+
+**Personal Loan vs. Education**
+```{r, fig.height=3, fig.width=6}
+# Stacked bar plot to test for education vs. personal loan
+raw_data %>% 
+  ggplot(aes(x = education, y = personal_loan, fill = personal_loan)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() + 
+  scale_fill_manual(values=c('#DE3533','#51A8C9')) +
+  labs(title = "Personal Loan vs. Education") +
+  theme_fivethirtyeight() +
+  theme(axis.title = element_text()) +
+  xlab('Education Level')
+```
+
+We can observe some differneces.
+
+**Personal Loan vs. Online**
+```{r, fig.height=3, fig.width=6}
+# Stacked bar plot to test for online vs. personal loan
+raw_data %>% 
+  ggplot(aes(x = online, y = personal_loan, fill = personal_loan)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() + 
+  scale_fill_manual(values=c('#DE3533','#51A8C9')) +
+  labs(title = "Personal Loan vs. Online") +
+  theme_fivethirtyeight() +
+  theme(axis.title = element_text()) +
+  xlab('Online')
+
+```
+
+We can observe the differnce in whether or not people borrow loans based on whether they engage in online banking.
+
+**Personal Loan vs. Securities Account**
+```{r, fig.height=3, fig.width=6}
+# Stacked bar plot to test for Securites Account vs. personal loan
+raw_data %>% 
+  ggplot(aes(x = securities_account, y = personal_loan, fill = personal_loan)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() + 
+  scale_fill_manual(values=c('#DE3533','#51A8C9')) +
+  labs(title = "Personal Loan vs. Securities Account") +
+  theme_fivethirtyeight() +
+  theme(axis.title = element_text()) +
+  xlab('Securities Account')
+
+```
+
+We can observe that people are more likely to a loan if they do not have a securities account
+
+**Personal Loan vs. CD Account**
+```{r, fig.height=3, fig.width=6}
+# Stacked bar plot to test for CD Account vs. personal loan
+raw_data %>% 
+  ggplot(aes(x = cd_account, y = personal_loan, fill = personal_loan)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() + 
+  scale_fill_manual(values=c('#DE3533','#51A8C9')) +
+  labs(title = "Personal Loan vs. CD Account") +
+  theme_fivethirtyeight() +
+  theme(axis.title = element_text()) +
+  xlab('CD Account')
+```
+We can observe that people are more likely to a loan if they do not have a securities account
+
+\pagebreak
+
+### Correlation Heatmap 
+
+
+We generate a heatmap of **correlations** among the numeric variables in the dataset.
+
+```{r}
+# Correlation plot for the numeric columns
+numeric_vaiables <- c('age', 'experience', 'income', 'mortgage', 'credit_card_spend')
+
+# Using ggcor from GGally package to produce correlation heatmap
+ggcorr(raw_data[, numeric_vaiables], nbreaks = 7, 
+       low = "#1E90FF", mid = "#AAAAAA", high = "#F21A00",
+       label = TRUE, label_size = 7, label_color='black',
+       legend.position = 'left') +
+  theme_gray()
+```
+
+
+We can observe that age and experience are **highly correlated**, Hence, we have to remove experience.
+
+
+\pagebreak
+
+
+# Data Preprocessing
+
+**Remove the experience variable**
+```{r, message = FALSE}
+# Removing Experience variable as it is highly correlated with age and will mess with our models if left
+raw_data$experience <- NULL
+
+# Data Splitting - Training Data = 60%, Validation Data = 20% & Testing Data = 20%
+```
+
+
+## Split the data
+
+**Splitting the dataset into train, validation and test**
+We split the dataset into three sets:
+
+```
+1. Training    60%  | To train the models on
+2. Validation  20%  | To tune and test our models to select best models
+3. Testing     20%  | To evaluate the final model
+```
+```{r}
+# Setting seed for reproducibility of results
+# Remove sample.kind = "Rounding" if R version < 3.5
+set.seed(7, sample.kind = "Rounding")
+
+# sample into three sets to create indices for train, validation, test sets
+idx <- sample(seq(1, 3), size = nrow(raw_data), replace = TRUE, prob = c(.6, .2, .2))
+
+# Split the data into three sets
+raw_train <- raw_data[idx == 1,]
+raw_val <- raw_data[idx == 2,]
+raw_test <- raw_data[idx == 3,]
+```
+
+**Standardizing the data**
+
+We have seen that the numeric data **ranges** are very different. So to bring them into a similar range, we standardize the data. i.e., we scale and centre the dataset.
+
+```{r}
+# Standardizing the numeric varaibles as we've seen that the ranges of numerical variables vary quite a bit
+# Using preProcess from caret package
+(norm.values <- preProcess(raw_train, method=c("center", "scale")))
+# Apply the preProcess params to the dat using preProcess.predict
+train <- predict(norm.values, raw_train)
+val <- predict(norm.values, raw_val)
+test <- predict(norm.values, raw_test)
+```
+
+\pagebreak
+**Summary of normalized data**
+```{r}
+# Check the new ranges
+summary(train)
+```
+
+\pagebreak
+
+# Model Building    
+
+First, we define a function to produce neat confusion matrix plots using **ggcorr from GGally** library. This library is built on top of the ggplot2 library.  
+
+```{r}
+# Helper function to draw the confusion matrix using ggplot
+prettyConfusion <- function(results){
+  # Convert the results from confusionMatrix toa  data frame
+  table <- data.frame(results$table)
+  
+  # Calcualte Proportions and Predicted columns
+  plotTable <- table %>%
+    mutate(Predicted = ifelse(table$Prediction == table$Reference, "Correct", "Wrong")) %>%
+    group_by(Reference) %>%
+    mutate(Proportion = Freq/sum(Freq))
+  
+  # Fill alpha relative to sensitivity/specificity by 
+  # proportional outcomes within reference groups
+  ggplot(plotTable, aes(Reference, Prediction, fill = Predicted, alpha = Proportion)) +
+    geom_tile() +
+    geom_text(aes(label = Freq), vjust = .5, fontface  = "bold", size=10) +
+    scale_fill_manual(values = c(Correct = "springgreen2", Wrong = "orangered2")) +
+    theme_bw() +
+    xlim(rev(levels(table$Reference))) +
+    theme_map() +
+    theme(legend.position = "none")
+}
+```
+
+
+**Logistic Regression Classifier**   
+```{r, fig.height=2, fig.width=2}
+##--------Logistic Regression Classifier----------##
+# train
+lr <- train(personal_loan ~ ., data = train, method = "glm", family = binomial)
+
+# predictions
+pred_lr <- predict(lr, val)
+
+# Accuracy of the model
+(acc_lr <- mean(pred_lr == val$personal_loan))
+
+# Generate Confusion Matrix of the model
+results_lr <- confusionMatrix(pred_lr, val$personal_loan, positive="1")
+
+# F1 Score
+(f1_lr <- results_lr$byClass['F1'])
+
+# Draw a pretty confusion matrix using the custom helper function
+prettyConfusion(results_lr)
+```
+
+Accuracy: `r acc_lr*100`      
+F1-Score: `r f1_lr`     
+
+**Naīve Bayes Classifier**
+```{r, fig.height=2, fig.width=2, warning = FALSE}
+##------------Naive Bayes Classifier--------------##
+# train
+nb <- train(personal_loan ~ ., data = train, method = "nb")
+
+# predictions
+pred_nb <- predict(nb, val)
+
+# Accuracy of the model
+(acc_nb <- mean(pred_nb == val$personal_loan))
+
+# Generate Confusion Matrix of the model
+results_nb <- confusionMatrix(pred_nb, val$personal_loan, positive="1")
+
+# F1 Score
+(f1_nb <- results_nb$byClass['F1'])
+
+# Draw a pretty confusion matrix using the custom helper function
+prettyConfusion(results_nb)
+```
+
+Accuracy: `r acc_nb*100`     
+F1-Score: `r f1_nb`     
+
+**Linear Discriminant Analysis**
+```{r, fig.height=2, fig.width=2}
+##---------Linear Discriminant Analysis------------##
+# train
+ld <- train(personal_loan ~ ., data = train, method = "lda", family = binomial)
+
+# predictions
+pred_ld <- predict(ld, val)
+
+# Accuracy of the model
+(acc_ld <- mean(pred_ld == val$personal_loan))
+
+# Generate Confusion Matrix of the model
+results_ld <- confusionMatrix(pred_ld, val$personal_loan, positive="1")
+
+# F1 Score
+(f1_ld <- results_ld$byClass['F1'])
+
+# Draw a pretty confusion matrix using the custom helper function
+prettyConfusion(results_ld)
+```
+
+Accuracy: `r acc_ld*100`       
+F1-Score: `r f1_ld`     
+
+**Loess**
+```{r, fig.height=2, fig.width=2, warning = FALSE}
+##----------------------Loess--------------------##
+
+# train
+loess <- train(personal_loan ~ ., data = train, method = "gamLoess")
+
+# predictions
+pred_loess <- predict(loess, val)
+
+# Accuracy of the model
+(acc_loess <- mean(pred_loess == val$personal_loan))
+
+# Generate Confusion Matrix of the model
+results_loess <- confusionMatrix(pred_loess, val$personal_loan, positive="1")
+
+# F1 Score
+(f1_loess <- results_loess$byClass['F1'])
+
+# Draw a pretty confusion matrix using the custom helper function
+prettyConfusion(results_loess)
+```
+
+Accuracy: `r acc_loess*100`     
+F1-Score: `r f1_loess`     
+
+**Quadratic Discriminant Analysis**    
+```{r, fig.height=2, fig.width=2}
+##--------Quadratic Discriminant Analysis----------##
+
+# train
+qd <- train(personal_loan ~ ., data = train, method = "qda", family = binomial)
+
+# predictions
+pred_qd <- predict(qd, val)
+
+# Accuracy of the model
+(acc_qd <- mean(pred_qd == val$personal_loan))
+
+# Generate Confusion Matrix of the model
+results_qd <- confusionMatrix(pred_qd, val$personal_loan, positive="1")
+
+# F1 Score
+(f1_qd <- results_qd$byClass['F1'])
+
+# Draw a pretty confusion matrix using the custom helper function
+prettyConfusion(results_qd)
+```
+
+Accuracy: `r acc_qd*100`     
+F1-Score: `r f1_qd`    
+
+**Support Vector Machine**
+```{r, fig.height=2, fig.width=2, warning = FALSE}
+##----------Support Vector Machine----------------##
+
+# train
+svm <- train(personal_loan ~ ., data = train, method = "svmLinear")
+
+# predictions
+pred_svm <- predict(loess, val)
+
+# Accuracy of the model
+(acc_svm <- mean(pred_svm == val$personal_loan))
+
+# Generate Confusion Matrix of the model
+results_svm <- confusionMatrix(pred_svm, val$personal_loan, positive="1")
+
+# F1 Score
+(f1_svm <- results_svm$byClass['F1'])
+
+# Draw a pretty confusion matrix using the custom helper function
+prettyConfusion(results_svm)
+```
+
+Accuracy: `r acc_svm*100`     
+F1-Score: `r f1_svm`
+
+**K Nearest Neighbours Classification**
+```{r, fig.height=2, fig.width=2, warning=FALSE}
+
+##--------------K Nearest Neighbours--------------##
+
+# Setting seed for reproducibility of results
+set.seed(7, sample.kind = "Rounding")
+
+# k values to test best k
+k_values <- data.frame(k = seq(2, 12, 1))
+
+# train
+knn <- train(personal_loan ~ ., data = train, method = "knn", 
+             tuneGrid = k_values)
+# best k value
+knn$bestTune
+
+# predictions
+pred_knn <- predict(knn, val)
+
+# Accuracy of the model
+(acc_knn <- mean(pred_knn == val$personal_loan))
+
+# Generate Confusion Matrix of the model
+results_knn <- confusionMatrix(pred_knn, val$personal_loan, positive="1")
+
+# F1 Score
+(f1_knn <- results_knn$byClass['F1'])
+
+# Draw a pretty confusion matrix using the custom helper function
+prettyConfusion(results_knn)
+```
+
+The best k value is: `r knn$bestTune`     
+Accuracy: `r acc_knn*100`     
+F1-Score: `r f1_knn`
+
+
+**Random Forest Classification**
+```{r, fig.height=2, fig.width=2, warning=FALSE}
+##----------------Random Forest------------------##
+
+# Setting seed for reproducibility of results
+set.seed(7, sample.kind = "Rounding")
+
+# Values of mtry
+mtryGrid <- data.frame(mtry = c(3,5,7,9))
+
+# train
+rf <-  train(personal_loan ~ ., data = train, method = "rf",
+             tuneGrid = mtryGrid, importance = T)
+
+# Plot the values of accuracy for values of mtry
+ggplot(rf) + theme_minimal()
+
+# best model param
+rf$bestTune
+
+# predictions
+pred_rf <- predict(rf, val)
+
+# Accuracy of the model
+(acc_rf <- mean(pred_rf == val$personal_loan))
+
+# Generate Confusion Matrix of the model
+results_rf <- confusionMatrix(pred_rf, val$personal_loan, positive="1")
+
+# F1 Score
+(f1_rf <- results_rf$byClass['F1'])
+
+# Draw a pretty confusion matrix using the custom helper function
+prettyConfusion(results_rf)
+
+```
+
+The best value of mtry is: `r rf$bestTune`
+
+Accuracy: `r acc_rf*100`     
+F1-Score: `r f1_rf`
+
+
+```{r}
+#Variable Importance
+varImp(rf)
+```
+
+We note that income, family and credit card are most important variables. This was also confirmed in our exploratory data analysis section.    
+
+**Ensemble Model (Voting Classifier)**
+``` {r, fig.height=2, fig.width=2, warning=FALSE}
+# votes are added up as total predictions from 6models that predict 1
+votes <- (pred_rf == 1) + (pred_svm == 1) + (pred_ld == 1) + (pred_lr == 1) + (pred_loess == 1)
+
+# Ensemble prediction is 1 if atleast three of the five models predict 1
+pred_ensemble <- ifelse(votes >= 3, 1, 0)
+
+# Accuradcy of the model
+(acc_ensemble <- mean(pred_ensemble == val$personal_loan))
+
+# Generate Confusion Matrix of the model
+results_ensemble <- confusionMatrix(factor(pred_ensemble), val$personal_loan, positive="1")
+
+# F1 Score
+(f1_ensemble <- results_ensemble$byClass['F1'])
+
+# Draw a pretty confusion matrix using the custom helper function
+prettyConfusion(results_ensemble)
+```
+
+Accuracy: `r acc_ensemble*100`    
+F1-Score: `r f1_ensemble`    
+
+\pagebreak
+
+## Validation Metrics    
+
+### Validation Accuracies   
+``` {r}
+#All models Validation Accuracies
+models <- c("Logistic regression", "Naive Bayes Classifier",
+            "LDA", "QDA", "Loess","K nearest neighbors",
+            "Random forest", "Ensemble" , "Support Vector Machine")
+# Accuracy list
+accuracy <- c(acc_lr, acc_nb, acc_ld, acc_qd, acc_loess, acc_knn, acc_rf, acc_ensemble, acc_svm)
+
+# Output the accuracies table
+data.frame(Model = models, Validation_Accuracy = accuracy) %>%
+  arrange(desc(Validation_Accuracy)) %>%
+  knitr::kable()
+```
+
+### Validation F1-Scores
+```{r}
+# All models Validation F1 Scores
+f1 <- c(f1_lr, f1_nb, f1_ld, f1_qd, f1_loess, f1_knn, f1_rf, f1_ensemble, f1_svm)
+
+# Output the f1 table
+data.frame(Model = models, Validation_F1 = f1) %>%
+  arrange(desc(Validation_F1)) %>%
+  knitr::kable()
+```
+\pagebreak
+
+The best performing models  on validation set are:
+```
+1. Random Forest
+2. Ensemble Voting Classifier
+3. Loess 
+4. Support Vector Machine
+5. Logistic Regression Classifier
+6. Linear Discriminant Analysis 
+```
+# Model Evaluation
+
+We generate the predictions for the test set using our best models selected using validation F1-Scores:    
+
+```{r, warning=FALSE}
+# Logistic Regression test set predictions
+test_lr <- predict(lr, test)
+
+# Confusion matrix for the test predictions of lr model
+test_results_lr <- confusionMatrix(test_lr, test$personal_loan, positive="1")
+
+# F1 Score
+(test_f1_lr <- test_results_lr$byClass['F1'])
+
+# LDA test set predictions
+test_ld <- predict(ld, test)
+
+# Confusion matrix for the test predictions of lda model
+test_results_ld <- confusionMatrix(test_ld, test$personal_loan, positive="1")
+
+# F1 Score
+(test_f1_ld <- test_results_ld$byClass['F1'])
+
+# Loess test set predictions
+test_loess <- predict(loess, test)
+
+# Confusion matrix for the test predictions of loess model
+test_results_loess <- confusionMatrix(test_loess, test$personal_loan, positive="1")
+
+# F1 Score
+(test_f1_loess <- test_results_loess$byClass['F1'])
+
+# SVM test set predictions
+test_svm <- predict(svm, test)
+
+# Confusion matrix for the test predictions of svm model
+test_results_svm <- confusionMatrix(test_svm, test$personal_loan, positive="1")
+
+# F1 Score
+(test_f1_svm <- test_results_svm$byClass['F1'])
+
+# Random Forest test set predictions
+test_rf <- predict(rf, test)
+
+# Confusion matrix for the test predictions of random forest model
+test_results_rf <- confusionMatrix(test_rf, test$personal_loan, positive="1")
+
+# F1 Score
+(test_f1_rf <- test_results_rf$byClass['F1'])
+
+# votes are added up as total predictions from 6models that predict 1
+test_votes <- (test_rf == 1) + (test_loess == 1) + (test_svm == 1) + (test_lr == 1) + (test_ld == 1)
+
+# Ensemble test set predictions
+test_ensemble <- ifelse(test_votes >= 3, 1, 0)
+
+# Confusion matrix for the test predictions of ensemble model
+test_results_ensemble <- confusionMatrix(factor(test_ensemble), test$personal_loan, positive="1")
+
+# F1 Score
+(test_f1_ensemble <- test_results_ensemble$byClass['F1'])
+```
+
+\pagebreak
+
+# Results
+Here we obatin the results for the best models on the test set as follows:   
+
+## Testing Accuracies
+
+```{r}
+# Selected models
+test_models <- c("Random Forest", "Loess" , "Support Vector Machine",
+                 "Logistic Regression", "Linear Discriminatn Analyis", "Ensemble")
+
+# Calculate Accuracies for the test set
+test_accuracy <- c(mean(test_rf == test$personal_loan),
+                   mean(test_loess == test$personal_loan),
+                   mean(test_svm == test$personal_loan),
+                   mean(test_lr == test$personal_loan),
+                   mean(test_ld == test$personal_loan),
+                   mean(test_ensemble == test$personal_loan))
+
+# Output the testing accuracies table
+data.frame(Model = test_models, Testing_Accuracy = test_accuracy) %>%
+  arrange(desc(Testing_Accuracy)) %>%
+  knitr::kable()
+
+```
+
+
+## Testing F1-Scores
+```{r}
+# All models Validation F1 Scores
+test_f1 <- c(test_f1_rf, test_f1_loess, test_f1_svm, 
+             test_f1_lr, test_f1_ld, test_f1_ensemble)
+
+# Output the f1 table
+data.frame(Model = test_models, Testing_F1 = test_f1) %>%
+  arrange(desc(Testing_F1)) %>%
+  knitr::kable()
+```
+
+\pagebreak
+
+# Conclusion
+
+Finally, we conclude that the best model for this project was the random forest model(`r rf$bestTune`). It had a testing F1-Score of 0.911 and Testing Accuracy 98.31%.    
+Further scope for this project would be to incorporate neural networks and gradient boosting models which might improve on our models, however, given the time taken to train and tune neural networks. We have left it to the future. Also, we could do some feature engineering to find out the main features and if possible, extract new features from the domain.   
+
+This analysis could've been better if we get more data from Bank of India so that the we can be sure that the models are not over-fitting to this specific dataset and generalize better to new or unseeen data.    
+
